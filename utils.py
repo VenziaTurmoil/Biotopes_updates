@@ -1,14 +1,20 @@
 import geopandas as gpd
 import requests
 from requests.auth import HTTPBasicAuth
+import configparser
 
 
-# PARAMS
-USERNAME = 'thierry'
-PASSWORD = 'thierry'
+"""
+Reads config file
+see https://stackoverflow.com/questions/19379120/how-to-read-a-config-file-using-python
+"""
+def read_config():
+    config_parser = configparser.RawConfigParser()
+    config_parser.read('./config.cfg')
 
-url = 'https://gisdemo.anf.etat.lu/geoserver/carto/wfs'
-layer_name = 'carto:version_intermediaire'
+    return dict(config_parser.items('CONFIGURATION'))
+
+config = read_config()
 
 """
 Transforme une couche distante en WFS en GeoDataFrame
@@ -28,7 +34,7 @@ def WFS_to_DataFrame(url, layer_name):
     wfs_request = requests.get(
                               url,
                               params=params,
-                              auth=HTTPBasicAuth(USERNAME, PASSWORD),
+                              auth=HTTPBasicAuth(config['username'], config['password']),
                               verify=False)
 
     # Read data from URL
@@ -49,3 +55,5 @@ def DataFrame_to_WFS(url, layer_name):
     # Fill temporary layer
 
     # Save layer to GeoServer
+
+    return 0
