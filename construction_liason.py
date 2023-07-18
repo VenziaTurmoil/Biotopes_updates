@@ -1,5 +1,3 @@
-import geopandas as gpd
-
 """
 Réalise une jointure spatiale entre deux DataFrame et en résulte une table de
 liaison.
