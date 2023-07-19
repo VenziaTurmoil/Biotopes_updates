@@ -39,13 +39,15 @@ En particulier, trie les types de changement et redirige vers le traitement appr
 
 @params historique: GeoDataFrame
 @params result: GeoDataFrame
+@params features: Array<GeoDataFrame>
 @return: GeoDataFrame
 """
-def traitement_historique(historique, result):
+def traitement_historique(historique, result, features):
 
     # Condition d'arret
     if len(historique) == 0:
-        return result
+        features.append(result)
+        return features
 
     # Param
     if len(historique) > 1:
@@ -82,9 +84,12 @@ def traitement_historique(historique, result):
 
     new_result['Fin'] = next_date
 
+    if (new_result['Fin'] != new_result['Debut']):
+        features.append(new_result)
+
     # Recursivité
     new_histo = historique.tail(-1)
-    return traitement_historique(new_histo, new_result)
+    return traitement_historique(new_histo, new_result, features)
 
 
 
@@ -135,7 +140,7 @@ def traitement_conservation(changement, result):
             'SF_Bew_Str1':changement['M1_Bew_Str1'],
             'SF_Bew_Bee1':changement['M1_Bew_Bee1'],
             'SF_Bewert_1':changement['M1_Bewert_1'],
-            'SF_Kartiere':changement['M1_Kartiere'],
+            'SF_Kartiere':changement['M1_Kartier'],
             'Link':changement['Link'],
             'SF_Milieu':changement['M1_Milieu'],
             'SF_Origin':changement['M1_Origin'],
@@ -153,8 +158,11 @@ Traite une extension du biotope
 """
 def traitement_extension(changement, result):
     new_result = traitement_conservation(changement, result)
-    new_result.geometry.union(changement.geometry)
-    return new_result
+    if changement['M1_Geocode'] == changement['M1_Geo_Par']:
+        new_result.geometry.union(changement.geometry)
+        return new_result
+    else:
+        return 'fuck me im out'
 
 """
 Traite une réduction du biotope
@@ -189,7 +197,7 @@ Traite l'ajout d'un nouveau biotope
 def traitement_nouveau(changement):
     new_result = gpd.GeoDataFrame({
             'Objectid':changement['Objectid'],
-            'Gemeinde':changement['Gemeinde'],
+            'Gemeinde':changement['Gemeinde'], #demander l'utilité de ce champ
             'Geocode':changement['M1_Geocode'],
             'SF_Aufnanr':changement['M1_Aufnanr'],
             'SF_Btyp1_co':changement['M1_Btyp1_co'],
