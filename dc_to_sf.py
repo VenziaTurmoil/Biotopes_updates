@@ -2,6 +2,26 @@ import geopandas as gpd
 import pandas as pd
 import numpy as np
 
+SF_COLUMNS = [
+    'Objectid',
+    'Gemeinde',
+    'Geocode',
+    'SF_Aufnanr',
+    'SF_Btyp1_co',
+    'SF_Subtyp',
+    'SF_Bew_Inv1',
+    'SF_Bew_Str1',
+    'SF_Bew_Bee1',
+    'SF_Bewert_1',
+    'SF_Kartiere',
+    'Link',
+    'SF_Milieu',
+    'SF_Origin',
+    'Debut',
+    'geometry'
+]
+
+
 """
 A partir d'une documentation du changement, réalise la version finale
 
@@ -10,86 +30,64 @@ A partir d'une documentation du changement, réalise la version finale
 """
 def dc_to_sf(dc):
 
-    # Liste les géocodes à traiter
-    M1_Geocodes = dc['M1_Geocode'].rename('Geocode')
-    E_Geocodes = dc['Geocode']
+    # INITIALISATION
 
-    geocodes = pd.concat([E_Geocodes, M1_Geocodes])
-    geocodes = geocodes.drop_duplicates().dropna()
+    # Trie la documentation du changement par date de modification
+    dc['_date'] = dc['E_Jahr']
+    dc['_date'].update(dc['M1_Jahr'])
+    dc = dc.sort_values(by=['_date', 'Geocode', 'M1_Geocode'])
 
-    # Traitement Principal
-    for geocode in geocodes:
+    sf = gpd.GeoDataFrame(columns=SF_COLUMNS, geometry='geometry', crs=dc.crs)
 
-        # Toutes les lignes traitant ce geocode
-        historique = dc[dc['M1_Geocode'] == geocode or (dc['Geocode'] == geocode and dc.notna()['M1_Jahr'])]
+    # RECURENCE
+    # DISCLAIMER: We iterate over DataFrames rows even though it is not recommended for a simple reason:
+        # We need the result of the previous row before computing the next -> Sequential Processing
+        # please refer to https://stackoverflow.com/questions/16476924/how-to-iterate-over-rows-in-a-dataframe-in-pandas
+    for index, changement in dc.iterrows():
+        sf = traitement_changement(changement, sf)
 
-        # Triées par date
-        historique['_date'] = historique['E_Jahr']
-        historique.update(historique['M1_Jahr'].rename('_date'))
-        historique = historique.sort_values(by=['_date'])
+    return sf
 
-        # Initialisation du traitement
 
-        traite = traitement_historique(historique, gpd.GeoDataFrame())
+
+
 
 
 """
-Traite l'historique d'un biotope avec un algorithme récursif
-En particulier, trie les types de changement et redirige vers le traitement appropprié
+Traite un changement d'un biotope en général
+Concrètement, trie les types de changement et redirige vers le traitement appropprié
 
-@params historique: GeoDataFrame
-@params result: GeoDataFrame
-@params features: Array<GeoDataFrame>
+@params changement: GeoDataFrame
+@params sf: GeoDataFrame
 @return: GeoDataFrame
 """
-def traitement_historique(historique, result, features):
-
-    # Condition d'arret
-    if len(historique) == 0:
-        features.append(result)
-        return features
-
-    # Param
-    if len(historique) > 1:
-        next_date = historique.iloc[1]['_date']
-    else:
-        next_date = np.nan
-
-    # Traitement
-    changement = historique.head(1)
+def traitement_changement(changement, sf):
 
     if changement.isna()['M1_Ver']:
-        new_result = traitement_etat_initial(changement)
+        result = traitement_etat_initial(changement, sf)
 
     elif changement['M1_Ver'] == 'X':
-        new_result = traitement_extension(changement, result)
+        result = traitement_extension(changement, sf)
 
     elif changement['M1_Ver'] == 'R':
-        new_result = traitement_reduction(changement, result)
+        result = traitement_reduction(changement, sf)
 
     elif changement['M1_Ver'] == 'W':
-        new_result = traitement_suppression(changement)
+        result = traitement_suppression(changement, sf)
 
     elif changement['M1_Ver'] == 'N':
-        new_result = traitement_nouveau(changement)
+        result = traitement_nouveau(changement, sf)
 
     elif changement['M1_Ver'].isin(['A', 'D', '0', 'M']):
-        new_result = traitement_conservation(changement, result)
+        result = traitement_modification(changement, sf)
 
     elif changement['M1_Ver'] == 'E':
-        new_result = traitement_echo(changement, result)
+        result = traitement_echo(changement, sf)
 
     else:
         raise Exception('Type de M1_Ver non supporté')
 
-    new_result['Fin'] = next_date
-
-    if (new_result['Fin'] != new_result['Debut']):
-        features.append(new_result)
-
-    # Recursivité
-    new_histo = historique.tail(-1)
-    return traitement_historique(new_histo, new_result, features)
+    return result
 
 
 
@@ -97,9 +95,10 @@ def traitement_historique(historique, result, features):
 Traite l'état initlal du biotope
 
 @params changement: GeoDataFrame
+@params sf: GeoDataFrame
 @return: @GeoDataFrame
 """
-def traitement_etat_initial(changement):
+def traitement_etat_initial(changement, sf):
     # Construction de la nouvelle feature selon les champs en entree
     new_result = gpd.GeoDataFrame({
             'Objectid':changement['Objectid'],
@@ -119,20 +118,23 @@ def traitement_etat_initial(changement):
             'Debut':changement['_date'],
             'geometry':changement['geometry']
         }, geometry='geometry', crs='EPSG:2169')
-    return new_result
+    return sf.append(new_result, ignore_index=True)
+
 
 """
-Traite le changement de l'état du biotope
+Traite le changement de modification du biotope
 
 @params changement: GeoDataFrame
-@params result: GeoDataFrame
+@params sf: GeoDataFrame
 @return: @GeoDataFrame
 """
-def traitement_conservation(changement, result):
+def traitement_modification(changement, sf):
+
+    # Construction de la novelle entrée
     new_result = gpd.GeoDataFrame({
-            'Objectid':result['Objectid'],
-            'Gemeinde':result['Gemeinde'],
-            'Geocode':result['Geocode'],
+            'Objectid':changement['Objectid'],
+            'Gemeinde':changement['Gemeinde'],
+            'Geocode':changement['M1_Geocode'],
             'SF_Aufnanr':changement['M1_Aufnanr'],
             'SF_Btyp1_co':changement['M1_Btyp1_co'],
             'SF_Subtyp':changement['M1_Subtyp'],
@@ -145,24 +147,65 @@ def traitement_conservation(changement, result):
             'SF_Milieu':changement['M1_Milieu'],
             'SF_Origin':changement['M1_Origin'],
             'Debut':changement['_date'],
-            'geometry':result['geometry']
+            'geometry':changement['geometry']
         }, geometry='geometry', crs='EPSG:2169')
-    return new_result
+
+    # Mise en place des effets de bords
+    new_sf = sf.clone()
+    state = sf[sf['Geocode'] == changement['M1_Geocode']].tail(1) # Dernier changement avant celui la
+    if not state.empty:
+        # Fusion des geométries
+        new_result['geometry'] = new_result.union(state)
+        if state['Debut'] == new_result['Debut']:
+            # Fusion de multiples modifications la même année
+            new_sf = sf.drop(state.index)
+        else:
+            # Date de fin sur l'ancien changement
+            new_sf['Fin'].loc[state.index] = new_result['Debut']
+
+    return new_sf.append(new_result, ignore_index=True)
+
 
 """
 Traite une extension du biotope
 
 @params changement: GeoDataFrame
-@params result: GeoDataFrame
+@params sf: GeoDataFrame
 @return: @GeoDataFrame
 """
-def traitement_extension(changement, result):
-    new_result = traitement_conservation(changement, result)
-    if changement['M1_Geocode'] == changement['M1_Geo_Par']:
-        new_result.geometry.union(changement.geometry)
-        return new_result
-    else:
-        return 'fuck me im out'
+def traitement_extension(changement, sf): #TODO little more reflexion
+
+    # Construction de la novelle entrée
+    new_result = gpd.GeoDataFrame({
+            'Objectid':changement['Objectid'],
+            'Gemeinde':changement['Gemeinde'],
+            'Geocode':changement['M1_Geocode'],
+            'SF_Aufnanr':changement['M1_Aufnanr'],
+            'SF_Btyp1_co':changement['M1_Btyp1_co'],
+            'SF_Subtyp':changement['M1_Subtyp'],
+            'SF_Bew_Inv1':changement['M1_Bew_Inv1'],
+            'SF_Bew_Str1':changement['M1_Bew_Str1'],
+            'SF_Bew_Bee1':changement['M1_Bew_Bee1'],
+            'SF_Bewert_1':changement['M1_Bewert_1'],
+            'SF_Kartiere':changement['M1_Kartier'],
+            'Link':changement['Link'],
+            'SF_Milieu':changement['M1_Milieu'],
+            'SF_Origin':changement['M1_Origin'],
+            'Debut':changement['_date'],
+            'geometry':changement['geometry']
+        }, geometry='geometry', crs='EPSG:2169')
+
+    # Mise en place des effets de bords
+    new_sf = sf.clone()
+    state = sf[sf['Geocode'] == changement['M1_Geo_Par']].tail(1) # Dernier changement avant celui la
+    if not state.empty:
+        # Fusion des geométries
+        new_result['geometry'] = new_result.union(state)
+        new_sf['Fin'].loc[state.index] = new_result['Debut']
+
+    return new_sf.append(new_result, ignore_index=True)
+
+
 
 """
 Traite une réduction du biotope
@@ -171,10 +214,43 @@ Traite une réduction du biotope
 @params result: GeoDataFrame
 @return: @GeoDataFrame
 """
-def traitement_reduction(changement, result):
-    new_result = traitement_conservation(changement, result)
-    new_result.geometry.difference(changement.geometry)
-    return new_result
+def traitement_reduction(changement, sf): #TODO
+
+    # Construction de la novelle entrée
+    new_result = gpd.GeoDataFrame({
+            'Objectid':changement['Objectid'],
+            'Gemeinde':changement['Gemeinde'],
+            'Geocode':changement['Geocode'],
+            'SF_Aufnanr':changement['E_Aufnanr'],
+            'SF_Btyp1_co':changement['E_Btyp1_co'],
+            'SF_Subtyp':changement['E_Subtyp'],
+            'SF_Bew_Inv1':changement['E_Bew_Inv1'],
+            'SF_Bew_Str1':changement['E_Bew_Str1'],
+            'SF_Bew_Bee1':changement['E_Bew_Bee1'],
+            'SF_Bewert_1':changement['E_Bewert_1'],
+            'SF_Kartiere':changement['E_Kartiere'],
+            'Link':changement['Link'],
+            'SF_Milieu':changement['E_Milieu'],
+            'SF_Origin':changement['E_Origin'],
+            'Debut':changement['_date'],
+            'geometry':changement['geometry']
+        }, geometry='geometry', crs='EPSG:2169')
+
+    # Mise en place des effets de bords
+    new_sf = sf.clone()
+    state = sf[sf['Geocode'] == changement['Geocode']].tail(1) # Dernier changement avant celui la
+    if not state.empty:
+        # Fusion des geométries
+        new_result['geometry'] = new_result.difference(state)
+        if state['Debut'] == new_result['Debut']:
+            # Fusion de multiples modifications la même année
+            new_sf = sf.drop(state.index)
+        else:
+            # Date de fin sur l'ancien changement
+            new_sf['Fin'].loc[state.index] = new_result['Debut']
+
+    return new_sf.append(new_result, ignore_index=True)
+
 
 """
 Traite la suppression du biotope
@@ -182,10 +258,43 @@ Traite la suppression du biotope
 @params changement: GeoDataFrame
 @return: @GeoDataFrame
 """
-def traitement_suppression(changement):
-    new_result = traitement_etat_initial(changement)
-    new_result.geometry = np.nan
-    return new_result
+def traitement_suppression(changement, sf):
+
+    # Construction de la novelle entrée
+    new_result = gpd.GeoDataFrame({
+            'Objectid':changement['Objectid'],
+            'Gemeinde':changement['Gemeinde'],
+            'Geocode':changement['M1_Geocode'],
+            'SF_Aufnanr':changement['M1_Aufnanr'],
+            'SF_Btyp1_co':changement['M1_Btyp1_co'],
+            'SF_Subtyp':changement['M1_Subtyp'],
+            'SF_Bew_Inv1':changement['M1_Bew_Inv1'],
+            'SF_Bew_Str1':changement['M1_Bew_Str1'],
+            'SF_Bew_Bee1':changement['M1_Bew_Bee1'],
+            'SF_Bewert_1':changement['M1_Bewert_1'],
+            'SF_Kartiere':changement['M1_Kartier'],
+            'Link':changement['Link'],
+            'SF_Milieu':changement['M1_Milieu'],
+            'SF_Origin':changement['M1_Origin'],
+            'Debut':changement['_date'],
+            'geometry':changement['geometry']
+        }, geometry='geometry', crs='EPSG:2169')
+
+    # Mise en place des effets de bords
+    new_sf = sf.clone()
+    state = sf[sf['Geocode'] == changement['M1_Geo_Par']].tail(1) # Dernier changement avant celui la
+    if not state.empty:
+        # Fusion des geométries
+        new_result['geometry'] = new_result.union(state)
+        if state['Debut'] == new_result['Debut']:
+            # Fusion de multiples modifications la même année
+            new_sf = sf.drop(state.index)
+        else:
+            # Date de fin sur l'ancien changement
+            new_sf['Fin'].loc[state.index] = new_result['Debut']
+
+    return new_sf.append(new_result, ignore_index=True)
+
 
 """
 Traite l'ajout d'un nouveau biotope
@@ -194,10 +303,10 @@ Traite l'ajout d'un nouveau biotope
 @params result: GeoDataFrame
 @return: @GeoDataFrame
 """
-def traitement_nouveau(changement):
+def traitement_nouveau(changement, sf):
     new_result = gpd.GeoDataFrame({
             'Objectid':changement['Objectid'],
-            'Gemeinde':changement['Gemeinde'], #demander l'utilité de ce champ
+            'Gemeinde':changement['Gemeinde'],
             'Geocode':changement['M1_Geocode'],
             'SF_Aufnanr':changement['M1_Aufnanr'],
             'SF_Btyp1_co':changement['M1_Btyp1_co'],
@@ -213,7 +322,9 @@ def traitement_nouveau(changement):
             'Debut':changement['_date'],
             'geometry':changement['geometry']
         }, geometry='geometry', crs='EPSG:2169')
-    return new_result
+
+    return sf.append(new_result, ignore_index=True)
+
 
 """
 Traite le changement de géométrie du biotope, du à de l'écho
@@ -222,23 +333,32 @@ Traite le changement de géométrie du biotope, du à de l'écho
 @params result: GeoDataFrame
 @return: @GeoDataFrame
 """
-def traitement_echo(changement, result):
+def traitement_echo(changement, sf):
+
+    new_sf = sf.clone()
+    state = sf[sf['Geocode'] == changement['M1_Geocode']].tail(1)
+
     new_result = gpd.GeoDataFrame({
-            'Objectid':result['Objectid'],
-            'Gemeinde':result['Gemeinde'],
-            'Geocode':result['Geocode'],
-            'SF_Aufnanr':result['SF_Aufnanr'],
-            'SF_Btyp1_co':result['SF_Btyp1_co'],
-            'SF_Subtyp':result['SF_Subtyp'],
-            'SF_Bew_Inv1':result['SF_Bew_Inv1'],
-            'SF_Bew_Str1':result['SF_Bew_Str1'],
-            'SF_Bew_Bee1':result['SF_Bew_Bee1'],
-            'SF_Bewert_1':result['SF_Bewert_1'],
-            'SF_Kartiere':result['SF_Kartiere'],
-            'Link':result['Link'],
-            'SF_Milieu':result['SF_Milieu'],
-            'SF_Origin':result['SF_Origin'],
-            'Debut':result['_date'],
-            'geometry':changement['geometry']
+            'Objectid':state['Objectid'],
+            'Gemeinde':state['Gemeinde'],
+            'Geocode':state['Geocode'],
+            'SF_Aufnanr':state['SF_Aufnanr'],
+            'SF_Btyp1_co':state['SF_Btyp1_co'],
+            'SF_Subtyp':state['SF_Subtyp'],
+            'SF_Bew_Inv1':state['SF_Bew_Inv1'],
+            'SF_Bew_Str1':state['SF_Bew_Str1'],
+            'SF_Bew_Bee1':state['SF_Bew_Bee1'],
+            'SF_Bewert_1':state['SF_Bewert_1'],
+            'SF_Kartiere':state['SF_Kartiere'],
+            'Link':state['Link'],
+            'SF_Milieu':state['SF_Milieu'],
+            'SF_Origin':state['SF_Origin'],
+            'Debut':state['_date'],
+            'geometry':changement['geometry'] # Seul champ changé
         }, geometry='geometry', crs='EPSG:2169')
-    return new_result
+
+    if not state.empty:
+            # Date de fin sur l'ancien changement
+            new_sf['Fin'].loc[state.index] = new_result['Debut']
+
+    return new_sf.append(new_result, ignore_index=True)

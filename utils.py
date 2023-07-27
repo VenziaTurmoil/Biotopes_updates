@@ -2,9 +2,6 @@ import geopandas as gpd
 import requests
 from requests.auth import HTTPBasicAuth
 import configparser
-import os
-from owslib.wfs import WebFeatureService
-from owslib.util import Authentication
 import certifi
 
 """
@@ -28,8 +25,6 @@ Transforme une couche distante en WFS en GeoDataFrame
 def WFS_to_DataFrame(url, layer_name):
 
     # Specify the parameters for fetching the data
-    # Count: specificies amount of rows to return (e.g. 10000 or 100)
-    # startIndex: specifies at which offset to start returning rows
     params = dict(service='WFS', version="2.0.0", request='GetFeature',
           typeName=layer_name, outputFormat='json')
 
@@ -38,7 +33,8 @@ def WFS_to_DataFrame(url, layer_name):
                               url,
                               params=params,
                               auth=HTTPBasicAuth(config['username'], config['password']),
-                              verify=False)
+                              cert=certifi.where()
+                              )
 
     # Read data from URL
     data = gpd.GeoDataFrame.from_features(wfs_request.json()["features"])
@@ -80,12 +76,15 @@ def DataFrame_to_WFS(df, url, layer_name):
                               headers=headers,
                               data=data,
                               auth=HTTPBasicAuth(config['username'], config['password']),
-                              verify=False)
+                              cert=certifi.where()
+                              )
+
+    return wfs_request
 
 
 
 
-
+#TODO: supprimer ces tests
 url = 'https://gisdemo.anf.etat.lu/geoserver/carto/wfs'
 layer_name = 'carto:version_intermediaire'
 
