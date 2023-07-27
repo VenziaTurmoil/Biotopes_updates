@@ -7,12 +7,12 @@ SF_COLUMNS = [
     'Gemeinde',
     'Geocode',
     'SF_Aufnanr',
-    'SF_Btyp1_co',
+    'SF_Btyp',
     'SF_Subtyp',
-    'SF_Bew_Inv1',
-    'SF_Bew_Str1',
-    'SF_Bew_Bee1',
-    'SF_Bewert_1',
+    'SF_Bew_Inv',
+    'SF_Bew_Str',
+    'SF_Bew_Bee',
+    'SF_Bew_Ges',
     'SF_Kartiere',
     'Link',
     'SF_Milieu',
@@ -35,14 +35,17 @@ def dc_to_sf(dc):
     # Trie la documentation du changement par date de modification
     dc['_date'] = dc['E_Jahr']
     dc['_date'].update(dc['M1_Jahr'])
+    # Et par les types de modifications, dans le bon sens
+    dc['M1_Ver'] = pd.Categorical(dc['M1_Ver'], ['N', 'W', 'R', 'A', 'D', '0', 'M', 'X', 'E'])
+    dc = dc.sort_values(by='M1_Ver')
     dc = dc.sort_values(by=['_date', 'Geocode', 'M1_Geocode'])
 
     sf = gpd.GeoDataFrame(columns=SF_COLUMNS, geometry='geometry', crs=dc.crs)
 
     # RECURENCE
-    # DISCLAIMER: We iterate over DataFrames rows even though it is not recommended for a simple reason:
-        # We need the result of the previous row before computing the next -> Sequential Processing
-        # please refer to https://stackoverflow.com/questions/16476924/how-to-iterate-over-rows-in-a-dataframe-in-pandas
+    # DISCLAIMER: We iterate over DataFrames rows even though it is not recommended for a reason:
+        # We need the result of the previous rows before computing the next -> Sequential Processing
+        # Please refer to https://stackoverflow.com/questions/16476924/how-to-iterate-over-rows-in-a-dataframe-in-pandas
     for index, changement in dc.iterrows():
         sf = traitement_changement(changement, sf)
 
@@ -63,25 +66,25 @@ Concrètement, trie les types de changement et redirige vers le traitement appro
 """
 def traitement_changement(changement, sf):
 
-    if changement.isna()['M1_Ver']:
+    if changement.isna()['M1_Ver'].squeeze():
         result = traitement_etat_initial(changement, sf)
 
-    elif changement['M1_Ver'] == 'X':
+    elif changement['M1_Ver'] == 'X'.squeeze():
         result = traitement_extension(changement, sf)
 
-    elif changement['M1_Ver'] == 'R':
+    elif changement['M1_Ver'] == 'R'.squeeze():
         result = traitement_reduction(changement, sf)
 
-    elif changement['M1_Ver'] == 'W':
+    elif changement['M1_Ver'] == 'W'.squeeze():
         result = traitement_suppression(changement, sf)
 
-    elif changement['M1_Ver'] == 'N':
+    elif changement['M1_Ver'] == 'N'.squeeze():
         result = traitement_nouveau(changement, sf)
 
-    elif changement['M1_Ver'].isin(['A', 'D', '0', 'M']):
+    elif changement['M1_Ver'].isin(['A', 'D', '0', 'M'].squeeze()):
         result = traitement_modification(changement, sf)
 
-    elif changement['M1_Ver'] == 'E':
+    elif changement['M1_Ver'] == 'E'.squeeze():
         result = traitement_echo(changement, sf)
 
     else:
@@ -105,12 +108,12 @@ def traitement_etat_initial(changement, sf):
             'Gemeinde':changement['Gemeinde'],
             'Geocode':changement['Geocode'],
             'SF_Aufnanr':changement['E_Aufnanr'],
-            'SF_Btyp1_co':changement['E_Btyp1_co'],
+            'SF_Btyp':changement['E_Btyp1_co'],
             'SF_Subtyp':changement['E_Subtyp'],
-            'SF_Bew_Inv1':changement['E_Bew_Inv1'],
-            'SF_Bew_Str1':changement['E_Bew_Str1'],
-            'SF_Bew_Bee1':changement['E_Bew_Bee1'],
-            'SF_Bewert_1':changement['E_Bewert_1'],
+            'SF_Bew_Inv':changement['E_Bew_Inv1'],
+            'SF_Bew_Str':changement['E_Bew_Str1'],
+            'SF_Bew_Bee':changement['E_Bew_Bee1'],
+            'SF_Bew_Ges':changement['E_Bewert_1'],
             'SF_Kartiere':changement['E_Kartiere'],
             'Link':changement['Link'],
             'SF_Milieu':changement['E_Milieu'],
@@ -136,12 +139,12 @@ def traitement_modification(changement, sf):
             'Gemeinde':changement['Gemeinde'],
             'Geocode':changement['M1_Geocode'],
             'SF_Aufnanr':changement['M1_Aufnanr'],
-            'SF_Btyp1_co':changement['M1_Btyp1_co'],
+            'SF_Btyp':changement['M1_Btyp'],
             'SF_Subtyp':changement['M1_Subtyp'],
-            'SF_Bew_Inv1':changement['M1_Bew_Inv1'],
-            'SF_Bew_Str1':changement['M1_Bew_Str1'],
-            'SF_Bew_Bee1':changement['M1_Bew_Bee1'],
-            'SF_Bewert_1':changement['M1_Bewert_1'],
+            'SF_Bew_Inv':changement['M1_Bew_Inv'],
+            'SF_Bew_Str':changement['M1_Bew_Str'],
+            'SF_Bew_Bee':changement['M1_Bew_Bee'],
+            'SF_Bew_Ges':changement['M1_Bew_Ges'],
             'SF_Kartiere':changement['M1_Kartier'],
             'Link':changement['Link'],
             'SF_Milieu':changement['M1_Milieu'],
@@ -155,13 +158,10 @@ def traitement_modification(changement, sf):
     state = sf[sf['Geocode'] == changement['M1_Geocode']].tail(1) # Dernier changement avant celui la
     if not state.empty:
         # Fusion des geométries
-        new_result['geometry'] = new_result.union(state)
-        if state['Debut'] == new_result['Debut']:
-            # Fusion de multiples modifications la même année
-            new_sf = sf.drop(state.index)
-        else:
-            # Date de fin sur l'ancien changement
-            new_sf['Fin'].loc[state.index] = new_result['Debut']
+        if not new_result['geometry'].is_empty().squeeze(): # Condition pour s'assurer des cas polygon -> point
+            new_result['geometry'] = new_result.union(state)
+        # Date de fin sur l'ancien changement
+        new_sf['Fin'].loc[state.index] = new_result['Debut']
 
     return new_sf.append(new_result, ignore_index=True)
 
@@ -173,7 +173,7 @@ Traite une extension du biotope
 @params sf: GeoDataFrame
 @return: @GeoDataFrame
 """
-def traitement_extension(changement, sf): #TODO little more reflexion
+def traitement_extension(changement, sf):
 
     # Construction de la novelle entrée
     new_result = gpd.GeoDataFrame({
@@ -181,12 +181,12 @@ def traitement_extension(changement, sf): #TODO little more reflexion
             'Gemeinde':changement['Gemeinde'],
             'Geocode':changement['M1_Geocode'],
             'SF_Aufnanr':changement['M1_Aufnanr'],
-            'SF_Btyp1_co':changement['M1_Btyp1_co'],
+            'SF_Btyp':changement['M1_Btyp'],
             'SF_Subtyp':changement['M1_Subtyp'],
-            'SF_Bew_Inv1':changement['M1_Bew_Inv1'],
-            'SF_Bew_Str1':changement['M1_Bew_Str1'],
-            'SF_Bew_Bee1':changement['M1_Bew_Bee1'],
-            'SF_Bewert_1':changement['M1_Bewert_1'],
+            'SF_Bew_Inv':changement['M1_Bew_Inv'],
+            'SF_Bew_Str':changement['M1_Bew_Str'],
+            'SF_Bew_Bee':changement['M1_Bew_Bee'],
+            'SF_Bew_Ges':changement['M1_Bew_Ges'],
             'SF_Kartiere':changement['M1_Kartier'],
             'Link':changement['Link'],
             'SF_Milieu':changement['M1_Milieu'],
@@ -197,7 +197,7 @@ def traitement_extension(changement, sf): #TODO little more reflexion
 
     # Mise en place des effets de bords
     new_sf = sf.clone()
-    state = sf[sf['Geocode'] == changement['M1_Geo_Par']].tail(1) # Dernier changement avant celui la
+    state = sf[sf['Geocode'] == changement['M1_Geo_Par']].tail(1) # Différence avec traitement_modification
     if not state.empty:
         # Fusion des geométries
         new_result['geometry'] = new_result.union(state)
@@ -222,12 +222,12 @@ def traitement_reduction(changement, sf): #TODO
             'Gemeinde':changement['Gemeinde'],
             'Geocode':changement['Geocode'],
             'SF_Aufnanr':changement['E_Aufnanr'],
-            'SF_Btyp1_co':changement['E_Btyp1_co'],
+            'SF_Btyp':changement['E_Btyp1_co'],
             'SF_Subtyp':changement['E_Subtyp'],
-            'SF_Bew_Inv1':changement['E_Bew_Inv1'],
-            'SF_Bew_Str1':changement['E_Bew_Str1'],
-            'SF_Bew_Bee1':changement['E_Bew_Bee1'],
-            'SF_Bewert_1':changement['E_Bewert_1'],
+            'SF_Bew_Inv':changement['E_Bew_Inv1'],
+            'SF_Bew_Str':changement['E_Bew_Str1'],
+            'SF_Bew_Bee':changement['E_Bew_Bee1'],
+            'SF_Bew_Ges':changement['E_Bewert_1'],
             'SF_Kartiere':changement['E_Kartiere'],
             'Link':changement['Link'],
             'SF_Milieu':changement['E_Milieu'],
@@ -253,7 +253,7 @@ def traitement_reduction(changement, sf): #TODO
 
 
 """
-Traite la suppression du biotope
+Traite la suppression du biotope i
 
 @params changement: GeoDataFrame
 @return: @GeoDataFrame
@@ -266,12 +266,12 @@ def traitement_suppression(changement, sf):
             'Gemeinde':changement['Gemeinde'],
             'Geocode':changement['M1_Geocode'],
             'SF_Aufnanr':changement['M1_Aufnanr'],
-            'SF_Btyp1_co':changement['M1_Btyp1_co'],
+            'SF_Btyp':changement['M1_Btyp'],
             'SF_Subtyp':changement['M1_Subtyp'],
-            'SF_Bew_Inv1':changement['M1_Bew_Inv1'],
-            'SF_Bew_Str1':changement['M1_Bew_Str1'],
-            'SF_Bew_Bee1':changement['M1_Bew_Bee1'],
-            'SF_Bewert_1':changement['M1_Bewert_1'],
+            'SF_Bew_Inv':changement['M1_Bew_Inv'],
+            'SF_Bew_Str':changement['M1_Bew_Str'],
+            'SF_Bew_Bee':changement['M1_Bew_Bee'],
+            'SF_Bew_Ges':changement['M1_Bew_Ges'],
             'SF_Kartiere':changement['M1_Kartier'],
             'Link':changement['Link'],
             'SF_Milieu':changement['M1_Milieu'],
@@ -309,12 +309,12 @@ def traitement_nouveau(changement, sf):
             'Gemeinde':changement['Gemeinde'],
             'Geocode':changement['M1_Geocode'],
             'SF_Aufnanr':changement['M1_Aufnanr'],
-            'SF_Btyp1_co':changement['M1_Btyp1_co'],
+            'SF_Btyp':changement['M1_Btyp'],
             'SF_Subtyp':changement['M1_Subtyp'],
-            'SF_Bew_Inv1':changement['M1_Bew_Inv1'],
-            'SF_Bew_Str1':changement['M1_Bew_Str1'],
-            'SF_Bew_Bee1':changement['M1_Bew_Bee1'],
-            'SF_Bewert_1':changement['M1_Bewert_1'],
+            'SF_Bew_Inv':changement['M1_Bew_Inv'],
+            'SF_Bew_Str':changement['M1_Bew_Str'],
+            'SF_Bew_Bee':changement['M1_Bew_Bee'],
+            'SF_Bew_Ges':changement['M1_Bew_Ges'],
             'SF_Kartiere':changement['M1_Kartiere'],
             'Link':changement['Link'],
             'SF_Milieu':changement['M1_Milieu'],
@@ -343,12 +343,12 @@ def traitement_echo(changement, sf):
             'Gemeinde':state['Gemeinde'],
             'Geocode':state['Geocode'],
             'SF_Aufnanr':state['SF_Aufnanr'],
-            'SF_Btyp1_co':state['SF_Btyp1_co'],
+            'SF_Btyp':state['SF_Btyp'],
             'SF_Subtyp':state['SF_Subtyp'],
-            'SF_Bew_Inv1':state['SF_Bew_Inv1'],
-            'SF_Bew_Str1':state['SF_Bew_Str1'],
-            'SF_Bew_Bee1':state['SF_Bew_Bee1'],
-            'SF_Bewert_1':state['SF_Bewert_1'],
+            'SF_Bew_Inv':state['SF_Bew_Inv'],
+            'SF_Bew_Str':state['SF_Bew_Str'],
+            'SF_Bew_Bee':state['SF_Bew_Bee'],
+            'SF_Bew_Ges':state['SF_Bew_Ges'],
             'SF_Kartiere':state['SF_Kartiere'],
             'Link':state['Link'],
             'SF_Milieu':state['SF_Milieu'],
