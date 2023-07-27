@@ -154,7 +154,7 @@ def traitement_modification(changement, sf):
         }, geometry='geometry', crs='EPSG:2169')
 
     # Mise en place des effets de bords
-    new_sf = sf.clone()
+    new_sf = sf.copy()
     state = sf[sf['Geocode'] == changement['M1_Geocode']].tail(1) # Dernier changement avant celui la
     if not state.empty:
         # Fusion des geométries
@@ -196,7 +196,7 @@ def traitement_extension(changement, sf):
         }, geometry='geometry', crs='EPSG:2169')
 
     # Mise en place des effets de bords
-    new_sf = sf.clone()
+    new_sf = sf.copy()
     state = sf[sf['Geocode'] == changement['M1_Geo_Par']].tail(1) # Différence avec traitement_modification
     if not state.empty:
         # Fusion des geométries
@@ -214,7 +214,7 @@ Traite une réduction du biotope
 @params result: GeoDataFrame
 @return: @GeoDataFrame
 """
-def traitement_reduction(changement, sf): #TODO
+def traitement_reduction(changement, sf):
 
     # Construction de la novelle entrée
     new_result = gpd.GeoDataFrame({
@@ -237,7 +237,7 @@ def traitement_reduction(changement, sf): #TODO
         }, geometry='geometry', crs='EPSG:2169')
 
     # Mise en place des effets de bords
-    new_sf = sf.clone()
+    new_sf = sf.copy()
     state = sf[sf['Geocode'] == changement['Geocode']].tail(1) # Dernier changement avant celui la
     if not state.empty:
         # Fusion des geométries
@@ -260,40 +260,16 @@ Traite la suppression du biotope i
 """
 def traitement_suppression(changement, sf):
 
-    # Construction de la novelle entrée
-    new_result = gpd.GeoDataFrame({
-            'Objectid':changement['Objectid'],
-            'Gemeinde':changement['Gemeinde'],
-            'Geocode':changement['M1_Geocode'],
-            'SF_Aufnanr':changement['M1_Aufnanr'],
-            'SF_Btyp':changement['M1_Btyp'],
-            'SF_Subtyp':changement['M1_Subtyp'],
-            'SF_Bew_Inv':changement['M1_Bew_Inv'],
-            'SF_Bew_Str':changement['M1_Bew_Str'],
-            'SF_Bew_Bee':changement['M1_Bew_Bee'],
-            'SF_Bew_Ges':changement['M1_Bew_Ges'],
-            'SF_Kartiere':changement['M1_Kartier'],
-            'Link':changement['Link'],
-            'SF_Milieu':changement['M1_Milieu'],
-            'SF_Origin':changement['M1_Origin'],
-            'Debut':changement['_date'],
-            'geometry':changement['geometry']
-        }, geometry='geometry', crs='EPSG:2169')
 
     # Mise en place des effets de bords
-    new_sf = sf.clone()
-    state = sf[sf['Geocode'] == changement['M1_Geo_Par']].tail(1) # Dernier changement avant celui la
+    new_sf = sf.copy()
+    state = sf[sf['Geocode'] == changement['Geocode']].tail(1) # Dernier changement avant celui la
     if not state.empty:
-        # Fusion des geométries
-        new_result['geometry'] = new_result.union(state)
-        if state['Debut'] == new_result['Debut']:
-            # Fusion de multiples modifications la même année
-            new_sf = sf.drop(state.index)
-        else:
-            # Date de fin sur l'ancien changement
-            new_sf['Fin'].loc[state.index] = new_result['Debut']
 
-    return new_sf.append(new_result, ignore_index=True)
+        # Date de fin sur l'ancien changement
+        new_sf['Fin'].loc[state.index] = changement['Debut']
+
+    return new_sf
 
 
 """
@@ -335,7 +311,7 @@ Traite le changement de géométrie du biotope, du à de l'écho
 """
 def traitement_echo(changement, sf):
 
-    new_sf = sf.clone()
+    new_sf = sf.copy()
     state = sf[sf['Geocode'] == changement['M1_Geocode']].tail(1)
 
     new_result = gpd.GeoDataFrame({
